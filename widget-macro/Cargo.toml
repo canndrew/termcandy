@@ -1,0 +1,13 @@
+[package]
+name = "widget-macro"
+version = "0.1.0"
+authors = ["Andrew Cann <shum@canndrew.org>"]
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "0.15", features = ["full", "visit-mut", "extra-traits"] }
+quote = "0.6"
+

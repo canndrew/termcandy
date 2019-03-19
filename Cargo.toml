@@ -1,0 +1,18 @@
+[package]
+name = "termcandy"
+version = "0.1.0"
+authors = ["Andrew Cann <shum@canndrew.org>"]
+edition = "2018"
+
+[dependencies]
+futures = "0.1"
+widget-macro = { path = "widget-macro" }
+tokio = "*"
+libc = "*"
+mio = "*"
+unicode-width = "*"
+tokio-signal = "*"
+termion = "*"
+log = "0.4.6"
+failure = "*"
+
