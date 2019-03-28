@@ -1,7 +1,7 @@
 use std::ops::{Generator, GeneratorState};
 use std::marker::PhantomPinned;
 use futures::{Async, Future};
-use crate::graphics::SurfaceMut;
+use crate::graphics::{SurfaceMut, Rect};
 pub use widget_macro::widget;
 use crate::events;
 use std::pin::Pin;
@@ -301,6 +301,69 @@ where
 {
     fn draw<'s, 'm>(&self, surface: &'m mut SurfaceMut<'s>) {
         self.widget.draw(surface)
+    }
+}
+
+pub struct Resize<W, M> {
+    widget: W,
+    map: M,
+}
+
+impl<W, M> Future for Resize<W, M>
+where
+    W: Future,
+    M: Fn(u16, u16) -> Rect + Sync + Send,
+{
+    type Item = W::Item;
+    type Error = W::Error;
+
+    fn poll(&mut self) -> Result<Async<W::Item>, W::Error> {
+        let map = &self.map;
+        let (w, h) = crate::screen::screen_size();
+        let area = map(w, h);
+        let mapped_w = (area.x1 - area.x0) as u16;
+        let mapped_h = (area.y1 - area.y0) as u16;
+        let mouse_map = &|x, y| {
+            if (x as i16) < area.x0 || (x as i16) >= area.x1 || (y as i16) < area.y0 || (y as i16) >= area.y1 {
+                return None;
+            }
+            Some((x - area.x0 as u16, y - area.y0 as u16))
+        };
+        let widget = &mut self.widget;
+        crate::screen::with_screen_size(mapped_w, mapped_h, || {
+            events::with_event_map(
+                |event| Some(match event {
+                    Event::Mouse(mouse_event) => Event::Mouse(match mouse_event {
+                        MouseEvent::Press(button, x, y) => {
+                            let (x, y) = mouse_map(x, y)?;
+                            MouseEvent::Press(button, x, y)
+                        },
+                        MouseEvent::Release(x, y) => {
+                            let (x, y) = mouse_map(x, y)?;
+                            MouseEvent::Release(x, y)
+                        },
+                        MouseEvent::Hold(x, y) => {
+                            let (x, y) = mouse_map(x, y)?;
+                            MouseEvent::Hold(x, y)
+                        },
+                    }),
+                    event => event,
+                }),
+                || widget.poll(),
+            )
+        })
+    }
+}
+
+impl<W, M> Widget for Resize<W, M>
+where
+    W: Widget,
+    M: Fn(u16, u16) -> Rect + Sync + Send,
+{
+    fn draw<'s, 'm>(&self, surface: &'m mut SurfaceMut<'s>) {
+        let rect = surface.rect();
+        let mut sub_surface = surface.region((self.map)(rect.x1 as u16, rect.y1 as u16));
+        self.widget.draw(&mut sub_surface)
     }
 }
 

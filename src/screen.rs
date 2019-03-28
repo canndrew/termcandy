@@ -6,10 +6,13 @@ use libc::SIGWINCH;
 use tokio_signal::unix::Signal;
 use tokio::reactor::PollEvented2;
 use tokio::io::AsyncWrite;
+use futures::task_local;
 
 use crate::io::{force_write, AlternateScreen, MouseTerminal, NonBlockingStdout, RawMode};
 use crate::graphics::{Color, Style, Surface};
 use crate::widget::Widget;
+
+task_local!(static SCREEN_SIZE: std::cell::Cell<(u16, u16)> = std::cell::Cell::new((0, 0)));
 
 pub struct Screen {
     inner: PollEvented2<AlternateScreen<MouseTerminal<RawMode<NonBlockingStdout>>>>,
@@ -36,6 +39,7 @@ impl Screen {
                 AlternateScreen::new(stdout)
                 .join(Signal::new(SIGWINCH))
                 .map(move |(inner, signal)| {
+                    SCREEN_SIZE.with(|screen_size| screen_size.set((w, h)));
                     let mut writing = Vec::new();
                     let _ = write!(writing, "{}", termion::cursor::Hide);
                     Screen {
@@ -58,6 +62,7 @@ impl Screen {
     pub fn poll_for_resizes(&mut self) -> io::Result<Async<(u16, u16)>> {
         if let Async::Ready(Some(SIGWINCH)) = self.sigwinch.poll()? {
             let (w, h) = termion::terminal_size()?;
+            SCREEN_SIZE.with(|screen_size| screen_size.set((w, h)));
             self.front_buffer = Surface::blank(w, h);
             self.back_buffer = Surface::blank(w, h);
             self.writing = Vec::with_capacity(w as usize * h as usize * 2);
@@ -203,4 +208,25 @@ impl Drop for Screen {
     }
 }
 
+pub(crate) fn with_screen_size<F, R>(w: u16, h: u16, func: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    let (old_w, old_h) = SCREEN_SIZE.with(|screen_size| {
+        let (old_w, old_h) = screen_size.get();
+        screen_size.set((w, h));
+        (old_w, old_h)
+    });
+    let ret = func();
+    SCREEN_SIZE.with(|screen_size| {
+        screen_size.set((old_w, old_h));
+    });
+    ret
+}
+
+pub fn screen_size() -> (u16, u16) {
+    SCREEN_SIZE.with(|screen_size| {
+        screen_size.get()
+    })
+}
 
