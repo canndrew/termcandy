@@ -2,12 +2,14 @@ use crate::graphics::{Style, Rect, Color};
 use unicode_width::UnicodeWidthChar;
 use std::cmp;
 
+/// A single grid cell of text on the terminal.
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub struct Cell {
     pub style: Style,
     pub c: char,
 }
 
+/// A 2-dimensional arrays of cells.
 pub struct Surface {
     w: u16,
     h: u16,
@@ -15,6 +17,7 @@ pub struct Surface {
 }
 
 impl Surface {
+    /// Create a new, blank surface.
     pub fn blank(w: u16, h: u16) -> Surface {
         let mut cells = Vec::with_capacity(w as usize * h as usize);
         for _ in 0..(w as usize * h as usize) {
@@ -27,16 +30,19 @@ impl Surface {
         }
     }
 
+    /// Get a reference to the cell at position (x, y).
     pub fn cell(&self, x: u16, y: u16) -> &Cell {
         let i = self.index(x as i16, y as i16).unwrap();
         &self.cells[i]
     }
 
+    /// Get a mutable reference to the cell at position (x, y).
     pub fn cell_mut(&mut self, x: u16, y: u16) -> &mut Cell {
         let i = self.index(x as i16, y as i16).unwrap();
         &mut self.cells[i]
     }
 
+    /// Set the cell at position (x, y)
     pub fn put(&mut self, c: char, x: i16, y: i16, style: Style) {
         let i = match self.index(x, y) {
             Some(i) => i,
@@ -54,6 +60,7 @@ impl Surface {
         }
     }
 
+    /// Print text to the surface.
     pub fn print(&mut self, text: &str, x: i16, y: i16, style: Style) {
         let w = self.w as i16;
         self.print_inner(text, x, w, y, style)
@@ -72,14 +79,17 @@ impl Surface {
         }
     }
 
+    /// Get the surface's width
     pub fn width(&self) -> u16 {
         self.w
     }
 
+    /// Get the surface's height
     pub fn height(&self) -> u16 {
         self.h
     }
 
+    /// Get a `SurfaceRef` reference to the surface.
     pub fn as_ref(&self) -> SurfaceRef {
         SurfaceRef {
             surface: self,
@@ -92,6 +102,7 @@ impl Surface {
         }
     }
 
+    /// Get a `SurfaceMut` reference to the surface.
     pub fn as_mut(&mut self) -> SurfaceMut {
         let w = self.w as i16;
         let h = self.h as i16;
@@ -106,6 +117,7 @@ impl Surface {
         }
     }
 
+    /// Draw a horizonal line on the surface.
     pub fn draw_h_line(&mut self, x0: i16, x1: i16, y: i16) {
         for x in x0..x1 {
             let i = match self.index(x, y) {
@@ -131,6 +143,7 @@ impl Surface {
         }
     }
 
+    /// Draw a vertical line on the surface.
     pub fn draw_v_line(&mut self, y0: i16, y1: i16, x: i16) {
         for y in y0..y1 {
             let i = match self.index(x, y) {
@@ -157,15 +170,15 @@ impl Surface {
     }
 
     fn index(&self, x: i16, y: i16) -> Option<usize> {
-        let i = x as isize + y as isize * self.w as isize;
-        if i >= 0 && ((i as usize) < self.cells.len()) {
-            Some(i as usize)
-        } else {
-            None
+        if x < 0 || x as u16 >= self.w || y < 0 || y as u16 >= self.h {
+            return None;
         }
+
+        let i = x as isize + y as isize * self.w as isize;
+        Some(i as usize)
     }
 
-    pub fn clear(&mut self, rect: Rect) {
+    fn clear(&mut self, rect: Rect) {
         let y0 = cmp::max(0, rect.y0) as usize;
         let y1 = cmp::min(self.h as i16, rect.y1) as usize;
         let x0 = cmp::max(0, rect.x0) as usize;
@@ -182,24 +195,29 @@ impl Surface {
     }
 }
 
+/// A shared reference to a (region of a) surface.
 pub struct SurfaceRef<'a> {
     surface: &'a Surface,
     rect: Rect,
 }
 
 impl<'a> SurfaceRef<'a> {
+    /// Get a reference to the cell at position (x, y).
     pub fn cell(&self, x: u16, y: u16) -> &Cell {
         self.surface.cell((x as i16 + self.rect.x0) as u16, (y as i16 + self.rect.y0) as u16)
     }
 
+    /// Get the surface's width
     pub fn width(&self) -> u16 {
         self.rect.width()
     }
 
+    /// Get the surface's height
     pub fn height(&self) -> u16 {
         self.rect.height()
     }
 
+    /// Get a rectangle representing the entire area of the surface.
     pub fn rect(&self) -> Rect {
         Rect {
             x0: 0,
@@ -210,6 +228,7 @@ impl<'a> SurfaceRef<'a> {
     }
 }
 
+/// A mutable reference to a (region of a) surface.
 pub struct SurfaceMut<'a> {
     surface: &'a mut Surface,
     rect: Rect,
@@ -220,14 +239,17 @@ impl<'a> SurfaceMut<'a> {
         self.surface.print_inner(text, x + self.rect.x0, self.rect.x1, y + self.rect.y0, style)
     }
 
+    /// Get the surface's width
     pub fn width(&self) -> u16 {
         self.rect.width()
     }
 
+    /// Get the surface's height
     pub fn height(&self) -> u16 {
         self.rect.height()
     }
 
+    /// Get a rectangle representing the entire area of the surface.
     pub fn rect(&self) -> Rect {
         Rect {
             x0: 0,
@@ -237,14 +259,17 @@ impl<'a> SurfaceMut<'a> {
         }
     }
 
+    /// Get a reference to the cell at position (x, y).
     pub fn cell(&self, x: u16, y: u16) -> &Cell {
         self.surface.cell((x as i16 + self.rect.x0) as u16, (y as i16 + self.rect.y0) as u16)
     }
 
+    /// Get a mutable reference to the cell at position (x, y).
     pub fn cell_mut(&mut self, x: u16, y: u16) -> &mut Cell {
         self.surface.cell_mut((x as i16 + self.rect.x0) as u16, (y as i16 + self.rect.y0) as u16)
     }
 
+    /// Draw a horizontal line on the surface.
     pub fn draw_h_line(&mut self, x0: i16, x1: i16, y: i16) {
         let x0 = cmp::max(-1, x0);
         let x1 = cmp::min(self.width() as i16, x1);
@@ -253,6 +278,7 @@ impl<'a> SurfaceMut<'a> {
         self.surface.draw_h_line(x0 + self.rect.x0, x1 + self.rect.x0, y + self.rect.y0);
     }
 
+    /// Draw a vertical line on the surface.
     pub fn draw_v_line(&mut self, y0: i16, y1: i16, x: i16) {
         let y0 = cmp::max(-1, y0);
         let y1 = cmp::min(self.height() as i16, y1);
@@ -261,6 +287,7 @@ impl<'a> SurfaceMut<'a> {
         self.surface.draw_v_line(y0 + self.rect.y0, y1 + self.rect.y0, x + self.rect.x0);
     }
 
+    /// Get a sub-region of the surface.
     pub fn region(&mut self, rect: Rect) -> SurfaceMut {
         assert!(rect.x0 >= 0);
         assert!(rect.x1 >= rect.x0 && rect.x1 <= self.width() as i16);
@@ -277,10 +304,12 @@ impl<'a> SurfaceMut<'a> {
         }
     }
 
+    /// Clear the surface.
     pub fn clear(&mut self) {
         self.surface.clear(self.rect);
     }
 
+    /// Fill the surface with the given color.
     pub fn fill(&mut self, color: Color) {
         for y in self.rect.y0..self.rect.y1 {
             for x in self.rect.x0..self.rect.x1 {
@@ -289,6 +318,7 @@ impl<'a> SurfaceMut<'a> {
         }
     }
 
+    /// Print a single character to a position on the surface.
     pub fn put(&mut self, c: char, x: i16, y: i16, style: Style) {
         if x < 0 || x >= self.width() as i16 || y < 0 || y >= self.height() as i16 {
             return;

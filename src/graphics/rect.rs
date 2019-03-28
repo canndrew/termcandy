@@ -1,5 +1,6 @@
 use std::cmp;
 
+/// A rectangle representing a region of a surface.
 #[derive(Debug, Clone, Copy)]
 pub struct Rect {
     pub x0: i16,

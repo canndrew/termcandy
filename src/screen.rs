@@ -9,7 +9,7 @@ use tokio::io::AsyncWrite;
 use futures::task_local;
 
 use crate::io::{force_write, AlternateScreen, MouseTerminal, NonBlockingStdout, RawMode};
-use crate::graphics::{Color, Style, Surface};
+use crate::graphics::{Color, Style, Surface, UnderlineKind};
 use crate::widget::Widget;
 
 task_local!(static SCREEN_SIZE: std::cell::Cell<(u16, u16)> = std::cell::Cell::new((0, 0)));
@@ -126,31 +126,78 @@ impl Screen {
         if self.current_style != style {
             write!(&mut self.writing, "\x1b[0m").unwrap();
             match style.fg {
-                Color::Colors16(x, true) => {
-                    write!(&mut self.writing, "\x1b[3{};1m", x).unwrap();
+                Color::Default => (),
+                Color::Colors16 { code, bright: true } => {
+                    write!(&mut self.writing, "\x1b[9{};1m", code as u32).unwrap();
                 },
-                Color::Colors16(x, false) => {
-                    write!(&mut self.writing, "\x1b[3{};1m", x).unwrap();
+                Color::Colors16 { code, bright: false } => {
+                    write!(&mut self.writing, "\x1b[3{};1m", code as u32).unwrap();
                 },
                 Color::Colors256(x) => {
                     write!(&mut self.writing, "\x1b[38;5;{}m", x).unwrap();
                 },
-                Color::Rgb { .. } | Color::Default => (),
+                Color::Rgb { r, g, b } => {
+                    write!(&mut self.writing, "\x1b[38;2;{};{};{}m", r, g, b).unwrap();
+                },
             }
             match style.bg {
-                Color::Colors16(x, true) => {
-                    write!(&mut self.writing, "\x1b[4{};1m", x).unwrap();
+                Color::Default => (),
+                Color::Colors16 { code, bright: true } => {
+                    write!(&mut self.writing, "\x1b[10{};1m", code as u32).unwrap();
                 },
-                Color::Colors16(x, false) => {
-                    write!(&mut self.writing, "\x1b[4{};1m", x).unwrap();
+                Color::Colors16 { code, bright: false } => {
+                    write!(&mut self.writing, "\x1b[4{};1m", code as u32).unwrap();
                 },
                 Color::Colors256(x) => {
                     write!(&mut self.writing, "\x1b[48;5;{}m", x).unwrap();
                 },
-                Color::Rgb { .. } | Color::Default => (),
+                Color::Rgb { r, g, b } => {
+                    write!(&mut self.writing, "\x1b[48;2;{};{};{}m", r, g, b).unwrap();
+                },
             }
             if style.attrs.bold {
-                write!(&mut self.writing, "{}", termion::style::Bold).unwrap();
+                write!(&mut self.writing, "\x1b[1m").unwrap();
+            }
+            if style.attrs.faint {
+                write!(&mut self.writing, "\x1b[2m").unwrap();
+            }
+            if style.attrs.italic {
+                write!(&mut self.writing, "\x1b[3m").unwrap();
+            }
+            if style.attrs.blink {
+                write!(&mut self.writing, "\x1b[5m").unwrap();
+            }
+            if style.attrs.strikethrough {
+                write!(&mut self.writing, "\x1b[9m").unwrap();
+            }
+            if style.attrs.overlined {
+                write!(&mut self.writing, "\x1b[53m").unwrap();
+            }
+            if let Some(underline) = style.attrs.underline {
+                match underline.kind {
+                    UnderlineKind::Single => {
+                        write!(&mut self.writing, "\x1b[4m").unwrap();
+                    },
+                    UnderlineKind::Double => {
+                        write!(&mut self.writing, "\x1b[4:2m").unwrap();
+                    },
+                    UnderlineKind::Wavy => {
+                        write!(&mut self.writing, "\x1b[4:3m").unwrap();
+                    },
+                }
+                match underline.color {
+                    Color::Default => (),
+                    Color::Colors16 { code, bright } => {
+                        let x = (code as u32) + if bright { 8 } else { 0 };
+                        write!(&mut self.writing, "\x1b[58;5;{}m", x).unwrap();
+                    },
+                    Color::Colors256(x) => {
+                        write!(&mut self.writing, "\x1b[58;5;{}m", x).unwrap();
+                    },
+                    Color::Rgb { r, g, b } => {
+                        write!(&mut self.writing, "\x1b[58;2;{};{};{}m", r, g, b).unwrap();
+                    },
+                }
             }
             self.current_style = style;
         }
@@ -224,6 +271,12 @@ where
     ret
 }
 
+/// Get the size of the screen as seen by the current widget.
+///
+/// # Note
+///
+/// Nesting widgets inside each other (using `Widget::resize`) will cause the nested widget to only
+/// see the size of the region of the screen that it's been allocated.
 pub fn screen_size() -> (u16, u16) {
     SCREEN_SIZE.with(|screen_size| {
         screen_size.get()

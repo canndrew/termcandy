@@ -1,3 +1,5 @@
+//! Types for drawing pretty UIs.
+
 mod color;
 mod style;
 mod surface;

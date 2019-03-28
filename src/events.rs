@@ -1,16 +1,18 @@
+//! Functions and types for capturing user-input events.
+
 use lazy_static::lazy_static;
 use futures::{Async, Future, Stream};
 use std::sync::Mutex;
 use slab::Slab;
 use futures::task::{current, Task};
 use futures::task_local;
-use termion::event::{Key, Event, MouseEvent, MouseButton};
 use crate::input::Events;
 use std::sync::Arc;
 use failure::format_err;
 use crate::io::NonBlockingStdin;
 use std::{mem, io};
 use log::trace;
+pub use termion::event::{Key, Event, MouseEvent, MouseButton};
 
 lazy_static! {
     static ref GLOBAL_WATCHER_SET: Mutex<Option<GlobalWatcherSet>> = Mutex::new(None);
@@ -230,6 +232,7 @@ impl Stream for EventWatcher {
     }
 }
 
+/// The given key.
 pub fn key(key: Key) -> impl Future<Item = (), Error = failure::Error> {
     let event = EventWatcher::new();
     event
@@ -244,6 +247,7 @@ pub fn key(key: Key) -> impl Future<Item = (), Error = failure::Error> {
     .map(|(opt, _)| opt.unwrap())
 }
 
+/// The given escape sequence, if the escape sequence wasn't parsed by termion.
 pub fn unsupported<'a>(bytes: &'a [u8]) -> impl Future<Item = (), Error = failure::Error> + 'a {
     let event = EventWatcher::new();
     event
@@ -258,6 +262,7 @@ pub fn unsupported<'a>(bytes: &'a [u8]) -> impl Future<Item = (), Error = failur
     .map(|(opt, _)| opt.unwrap())
 }
 
+/// Mouse left button clicked.
 pub fn left_click() -> impl Future<Item = (u16, u16), Error = failure::Error> {
     let event = EventWatcher::new();
     event
@@ -272,3 +277,119 @@ pub fn left_click() -> impl Future<Item = (u16, u16), Error = failure::Error> {
     .map(|(opt, _)| opt.unwrap())
 }
 
+/// Mouse right button clicked.
+pub fn right_click() -> impl Future<Item = (u16, u16), Error = failure::Error> {
+    let event = EventWatcher::new();
+    event
+    .filter_map(move |event| match event {
+        Event::Mouse(MouseEvent::Press(MouseButton::Right, x, y)) => Some((x - 1, y - 1)),
+        _ => None,
+    })
+    .into_future()
+    .map_err(|(e, _)| {
+        format_err!("error reading stdin: {}", e)
+    })
+    .map(|(opt, _)| opt.unwrap())
+}
+
+/// Mouse clicked.
+pub fn click(button: MouseButton) -> impl Future<Item = (u16, u16), Error = failure::Error> {
+    let event = EventWatcher::new();
+    event
+    .filter_map(move |event| match event {
+        Event::Mouse(MouseEvent::Press(got_button, x, y)) if button == got_button => Some((x - 1, y - 1)),
+        _ => None,
+    })
+    .into_future()
+    .map_err(|(e, _)| {
+        format_err!("error reading stdin: {}", e)
+    })
+    .map(|(opt, _)| opt.unwrap())
+}
+
+/// Mouse button held and dragged.
+pub fn hold() -> impl Future<Item = (u16, u16), Error = failure::Error> {
+    let event = EventWatcher::new();
+    event
+    .filter_map(move |event| match event {
+        Event::Mouse(MouseEvent::Hold(x, y)) => Some((x - 1, y - 1)),
+        _ => None,
+    })
+    .into_future()
+    .map_err(|(e, _)| {
+        format_err!("error reading stdin: {}", e)
+    })
+    .map(|(opt, _)| opt.unwrap())
+}
+
+/// Mouse button released.
+pub fn release() -> impl Future<Item = (u16, u16), Error = failure::Error> {
+    let event = EventWatcher::new();
+    event
+    .filter_map(move |event| match event {
+        Event::Mouse(MouseEvent::Release(x, y)) => Some((x - 1, y - 1)),
+        _ => None,
+    })
+    .into_future()
+    .map_err(|(e, _)| {
+        format_err!("error reading stdin: {}", e)
+    })
+    .map(|(opt, _)| opt.unwrap())
+}
+
+/// Any mouse event.
+pub fn any_mouse_event() -> impl Future<Item = MouseEvent, Error = failure::Error> {
+    let event = EventWatcher::new();
+    event
+    .filter_map(move |event| match event {
+        Event::Mouse(mouse_event) => Some(mouse_event),
+        _ => None,
+    })
+    .into_future()
+    .map_err(|(e, _)| {
+        format_err!("error reading stdin: {}", e)
+    })
+    .map(|(opt, _)| opt.unwrap())
+}
+
+/// Any keystroke.
+pub fn any_key() -> impl Future<Item = Key, Error = failure::Error> {
+    let event = EventWatcher::new();
+    event
+    .filter_map(move |event| match event {
+        Event::Key(key) => Some(key),
+        _ => None,
+    })
+    .into_future()
+    .map_err(|(e, _)| {
+        format_err!("error reading stdin: {}", e)
+    })
+    .map(|(opt, _)| opt.unwrap())
+}
+
+/// Any unsupported event, returned as a vector of bytes containing the unrecognized escape
+/// sequence.
+pub fn any_unsupported() -> impl Future<Item = Vec<u8>, Error = failure::Error> {
+    let event = EventWatcher::new();
+    event
+    .filter_map(move |event| match event {
+        Event::Unsupported(v) => Some(v),
+        _ => None,
+    })
+    .into_future()
+    .map_err(|(e, _)| {
+        format_err!("error reading stdin: {}", e)
+    })
+    .map(|(opt, _)| opt.unwrap())
+}
+
+/// Any terminal user-input event
+pub fn any() -> impl Future<Item = Event, Error = failure::Error> {
+    let event = EventWatcher::new();
+    event
+    .into_future()
+    .map_err(|(e, _)| {
+        format_err!("error reading stdin: {}", e)
+    })
+    .map(|(opt, _)| opt.unwrap())
+}

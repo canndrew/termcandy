@@ -31,37 +31,6 @@ impl Events {
             escape_timeout: None,
         })
     }
-
-    /*
-    pub fn key<'a>(&'a mut self, key: Key) -> impl Future<Item = (), Error = failure::Error> + 'a {
-        self
-        .filter_map(move |event| match event {
-            Event::Key(got) if got == key => Some(()),
-            _ => None,
-        })
-        .into_future()
-        .map_err(|(e, _)| e)
-        .map(|(opt, _)| opt.unwrap())
-    }
-
-    pub fn any_key<'a>(&'a mut self) -> impl Future<Item = Key, Error = failure::Error> + 'a {
-        self
-        .filter_map(move |event| match event {
-            Event::Key(got) => Some(got),
-            _ => None,
-        })
-        .into_future()
-        .map_err(|(e, _)| e)
-        .map(|(opt, _)| opt.unwrap())
-    }
-
-    pub fn next<'a>(&'a mut self) -> impl Future<Item = Event, Error = failure::Error> + 'a {
-        self
-        .into_future()
-        .map_err(|(e, _)| e)
-        .map(|(opt, _)| opt.unwrap())
-    }
-    */
 }
 
 impl Stream for Events {

@@ -107,7 +107,7 @@ pub fn select_widget(branches: TokenStream) -> TokenStream {
     let parsed = syn::parse_macro_input!(branches as SelectWidget);
     let branches: Vec<_> = parsed.punctuated.into_iter().collect();
 
-    let mut sanitizer = BreakSanitizer { found: false };
+    //let mut sanitizer = BreakSanitizer { found: false };
     let mut idents = Vec::with_capacity(branches.len());
     let mut drops = Vec::with_capacity(branches.len());
     let mut let_bindings = Vec::with_capacity(branches.len());
@@ -127,8 +127,8 @@ pub fn select_widget(branches: TokenStream) -> TokenStream {
         let ident = &Ident::new(&format!("widget_{}", i), Span::call_site());
         let pat = branch.pat;
         let expr = branch.expr;
-        let mut body = branch.body;
-        syn::visit_mut::visit_expr_mut(&mut sanitizer, &mut body);
+        let body = branch.body;
+        //syn::visit_mut::visit_expr_mut(&mut sanitizer, &mut body);
         let let_binding = quote! {
             let mut #ident = #expr;
         };
@@ -164,6 +164,7 @@ pub fn select_widget(branches: TokenStream) -> TokenStream {
         }
     };
 
+    /*
     let ret = if sanitizer.found {
         quote! { 'select_widget: {
             let break_opt = 'select_widget_sanitized: { #inner };
@@ -175,6 +176,8 @@ pub fn select_widget(branches: TokenStream) -> TokenStream {
     } else {
         quote! { 'select_widget: { #inner }}
     };
+    */
+    let ret = quote! { 'select_widget: { #inner }};
     TokenStream::from(ret)
 }
 
@@ -206,6 +209,7 @@ impl Parse for SelectWidgetBranch {
     }
 }
 
+/*
 struct BreakSanitizer {
     found: bool,
 }
@@ -252,4 +256,5 @@ impl syn::visit_mut::VisitMut for BreakSanitizer {
         self.found = true;
     }
 }
+*/
 

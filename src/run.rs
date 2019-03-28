@@ -6,9 +6,12 @@ use crate::io::non_blocking_stdio;
 use log::trace;
 use crate::events::EventTaskHandle;
 
+/// Errors returned by `termcandy::run`.
 #[derive(Debug)]
 pub enum RunError<E> {
+    /// The given widget returned an error.
     Widget(E),
+    /// IO error using the terminal.
     Io(io::Error),
 }
 
@@ -24,6 +27,7 @@ where
     }
 }
 
+/// Create a future that initializes the terminal and runs the given widget.
 pub fn run<W>(widget: W) -> impl Future<Item = W::Item, Error = RunError<W::Error>>
 where
     W: Widget,
