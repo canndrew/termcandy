@@ -4,15 +4,15 @@ use unicode_width::UnicodeWidthChar;
 use futures::{Async, Future, Stream, IntoFuture};
 use libc::SIGWINCH;
 use tokio_signal::unix::Signal;
+use tokio::reactor::PollEvented2;
+use tokio::io::AsyncWrite;
 
-use crate::io::{AlternateScreen, MouseTerminal, NonBlockingStdout, RawMode};
+use crate::io::{force_write, AlternateScreen, MouseTerminal, NonBlockingStdout, RawMode};
 use crate::graphics::{Color, Style, Surface};
 use crate::widget::Widget;
 
-type ScreenInner = AlternateScreen<MouseTerminal<RawMode<NonBlockingStdout>>>;
-
 pub struct Screen {
-    inner: ScreenInner,
+    inner: PollEvented2<AlternateScreen<MouseTerminal<RawMode<NonBlockingStdout>>>>,
     sigwinch: Signal,
     front_buffer: Surface,
     back_buffer: Surface,
@@ -25,7 +25,9 @@ pub struct Screen {
 }
 
 impl Screen {
-    pub fn new(stdout: NonBlockingStdout, w: u16, h: u16) -> impl Future<Item=Screen, Error=io::Error> + 'static {
+    pub fn new(stdout: NonBlockingStdout, w: u16, h: u16)
+        -> impl Future<Item=Screen, Error=io::Error> + 'static
+    {
         RawMode::new(stdout)
         .into_future()
         .and_then(move |stdout| {
@@ -34,12 +36,14 @@ impl Screen {
                 AlternateScreen::new(stdout)
                 .join(Signal::new(SIGWINCH))
                 .map(move |(inner, signal)| {
+                    let mut writing = Vec::new();
+                    let _ = write!(writing, "{}", termion::cursor::Hide);
                     Screen {
-                        inner: inner,
+                        inner: PollEvented2::new(inner),
                         front_buffer: Surface::blank(w, h),
                         back_buffer: Surface::blank(w, h),
                         sigwinch: signal,
-                        writing: Vec::new(),
+                        writing: writing,
                         damaged: true,
                         amount_written: 0,
                         cursor_x: 0,
@@ -76,7 +80,9 @@ impl Screen {
     where
         W: Widget
     {
-        widget.draw(self.back_buffer.as_mut())
+        let mut surface = self.back_buffer.as_mut();
+        surface.clear();
+        widget.draw(&mut surface);
     }
 
     pub fn flush(&mut self) -> io::Result<Async<()>> {
@@ -91,14 +97,13 @@ impl Screen {
     fn flush_front(&mut self) -> io::Result<Async<()>> {
         loop {
             if self.amount_written == self.writing.len() {
+                self.writing.clear();
+                self.amount_written = 0;
                 return Ok(Async::Ready(()));
             }
-            match self.inner.write(&self.writing[self.amount_written..]) {
-                Ok(n) => self.amount_written += n,
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    return Ok(Async::NotReady);
-                }
-                Err(e) => return Err(e),
+            match self.inner.poll_write(&self.writing[self.amount_written..])? {
+                Async::Ready(n) => self.amount_written += n,
+                Async::NotReady => return Ok(Async::NotReady),
             }
         }
     }
@@ -115,19 +120,32 @@ impl Screen {
     fn set_style(&mut self, style: Style) {
         if self.current_style != style {
             write!(&mut self.writing, "\x1b[0m").unwrap();
-            if let Color::Named(x, bold) = style.fg {
-                if bold {
+            match style.fg {
+                Color::Colors16(x, true) => {
                     write!(&mut self.writing, "\x1b[3{};1m", x).unwrap();
-                } else {
-                    write!(&mut self.writing, "\x1b[3{}m", x).unwrap();
-                }
+                },
+                Color::Colors16(x, false) => {
+                    write!(&mut self.writing, "\x1b[3{};1m", x).unwrap();
+                },
+                Color::Colors256(x) => {
+                    write!(&mut self.writing, "\x1b[38;5;{}m", x).unwrap();
+                },
+                Color::Rgb { .. } | Color::Default => (),
             }
-            if let Color::Named(x, bold) = style.bg {
-                if bold {
+            match style.bg {
+                Color::Colors16(x, true) => {
                     write!(&mut self.writing, "\x1b[4{};1m", x).unwrap();
-                } else {
-                    write!(&mut self.writing, "\x1b[4{}m", x).unwrap();
-                }
+                },
+                Color::Colors16(x, false) => {
+                    write!(&mut self.writing, "\x1b[4{};1m", x).unwrap();
+                },
+                Color::Colors256(x) => {
+                    write!(&mut self.writing, "\x1b[48;5;{}m", x).unwrap();
+                },
+                Color::Rgb { .. } | Color::Default => (),
+            }
+            if style.attrs.bold {
+                write!(&mut self.writing, "{}", termion::style::Bold).unwrap();
             }
             self.current_style = style;
         }
@@ -174,6 +192,14 @@ impl Screen {
             }
         }
         self.damaged = false;
+    }
+}
+
+impl Drop for Screen {
+    fn drop(&mut self) {
+        let mut v = Vec::new();
+        let _ = write!(v, "{}", termion::cursor::Show);
+        force_write(&mut self.inner, v);
     }
 }
 

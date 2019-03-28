@@ -3,6 +3,7 @@ use termion::raw::IntoRawMode;
 use tokio::io::AsyncWrite;
 use futures::Async;
 use std::io::{self, Write};
+use mio::{Evented, Poll, Token, Ready, PollOpt};
 
 pub struct RawMode<W: AsyncWrite> {
     inner: termion::raw::RawTerminal<W>,
@@ -33,4 +34,28 @@ impl<W: AsyncWrite> AsyncWrite for RawMode<W> {
     }
 }
 
+impl<W: AsyncWrite + Evented> Evented for RawMode<W> {
+    fn register(
+        &self, 
+        poll: &Poll, 
+        token: Token, 
+        interest: Ready, 
+        opts: PollOpt
+    ) -> io::Result<()> {
+        self.inner.register(poll, token, interest, opts)
+    }
 
+    fn reregister(
+        &self, 
+        poll: &Poll, 
+        token: Token, 
+        interest: Ready, 
+        opts: PollOpt
+    ) -> io::Result<()> {
+        self.inner.reregister(poll, token, interest, opts)
+    }
+
+    fn deregister(&self, poll: &Poll) -> io::Result<()> {
+        self.inner.deregister(poll)
+    }
+}

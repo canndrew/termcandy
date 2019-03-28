@@ -1,9 +1,9 @@
 use tokio::io::AsyncWrite;
 use tokio::io::{WriteAll};
-use std::time::{Duration, Instant};
-use std::thread;
 use std::io::{self, Write};
 use futures::{Future, Async};
+use crate::io::force_write;
+use mio::{Evented, Poll, Token, Ready, PollOpt};
 
 /// A sequence of escape codes to enable terminal mouse support.
 const ENTER_MOUSE_SEQUENCE: &'static str = csi!("?1000h\x1b[?1002h\x1b[?1015h\x1b[?1006h");
@@ -25,17 +25,7 @@ impl<W: AsyncWrite> MouseTerminal<W> {
 
 impl<W: AsyncWrite> Drop for MouseTerminal<W> {
     fn drop(&mut self) {
-        let deadline = Instant::now() + Duration::from_millis(500);
-        let mut write_all = tokio::io::write_all(&mut self.inner, EXIT_MOUSE_SEQUENCE);
-        loop {
-            if let Ok(Async::NotReady) = write_all.poll() {
-                if deadline < Instant::now() {
-                    thread::yield_now();
-                    continue;
-                }
-            }
-            break;
-        }
+        force_write(&mut self.inner, EXIT_MOUSE_SEQUENCE);
     }
 }
 
@@ -71,4 +61,28 @@ impl<W: AsyncWrite> Future for MakeMouseTerminal<W> {
     }
 }
 
+impl<W: AsyncWrite + Evented> Evented for MouseTerminal<W> {
+    fn register(
+        &self, 
+        poll: &Poll, 
+        token: Token, 
+        interest: Ready, 
+        opts: PollOpt
+    ) -> io::Result<()> {
+        self.inner.register(poll, token, interest, opts)
+    }
 
+    fn reregister(
+        &self, 
+        poll: &Poll, 
+        token: Token, 
+        interest: Ready, 
+        opts: PollOpt
+    ) -> io::Result<()> {
+        self.inner.reregister(poll, token, interest, opts)
+    }
+
+    fn deregister(&self, poll: &Poll) -> io::Result<()> {
+        self.inner.deregister(poll)
+    }
+}

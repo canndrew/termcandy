@@ -15,4 +15,6 @@ tokio-signal = "*"
 termion = "*"
 log = "0.4.6"
 failure = "*"
+lazy_static = "*"
+slab = "*"
 

@@ -1,9 +1,9 @@
 use std::env;
 use tokio::io::{AsyncWrite, WriteAll};
-use std::time::{Duration, Instant};
-use std::thread;
 use std::io::{self, Write};
 use futures::{Future, Async};
+use crate::io::force_write;
+use mio::{Evented, Poll, Token, Ready, PollOpt};
 
 const ENTER_ALTERNATE_SCREEN_SEQUENCE: &'static str = csi!("?1049h");
 
@@ -31,17 +31,7 @@ impl<W: AsyncWrite> AlternateScreen<W> {
 impl<W: AsyncWrite> Drop for AlternateScreen<W> {
     fn drop(&mut self) {
         if self.enabled {
-            let deadline = Instant::now() + Duration::from_millis(500);
-            let mut write_all = tokio::io::write_all(&mut self.inner, EXIT_ALTERNATE_SCREEN_SEQUENCE);
-            loop {
-                if let Ok(Async::NotReady) = write_all.poll() {
-                    if deadline < Instant::now() {
-                        thread::yield_now();
-                        continue;
-                    }
-                }
-                break;
-            }
+            force_write(&mut self.inner, EXIT_ALTERNATE_SCREEN_SEQUENCE);
         }
     }
 }
@@ -79,4 +69,29 @@ impl<W: AsyncWrite> Future for MakeAlternateScreen<W> {
     }
 }
 
+impl<W: AsyncWrite + Evented> Evented for AlternateScreen<W> {
+    fn register(
+        &self, 
+        poll: &Poll, 
+        token: Token, 
+        interest: Ready, 
+        opts: PollOpt
+    ) -> io::Result<()> {
+        self.inner.register(poll, token, interest, opts)
+    }
+
+    fn reregister(
+        &self, 
+        poll: &Poll, 
+        token: Token, 
+        interest: Ready, 
+        opts: PollOpt
+    ) -> io::Result<()> {
+        self.inner.reregister(poll, token, interest, opts)
+    }
+
+    fn deregister(&self, poll: &Poll) -> io::Result<()> {
+        self.inner.deregister(poll)
+    }
+}
 

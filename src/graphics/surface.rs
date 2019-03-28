@@ -1,4 +1,4 @@
-use crate::graphics::{Style, Rect};
+use crate::graphics::{Style, Rect, Color};
 use unicode_width::UnicodeWidthChar;
 use std::cmp;
 
@@ -64,7 +64,7 @@ impl Surface {
         let mut x = x0;
         while let Some(c) = chars.next() {
             let width = c.width().unwrap_or(0) as i16;
-            if x + width >= x1 {
+            if x + width > x1 {
                 break;
             }
             self.put(c, x, y, style);
@@ -164,6 +164,22 @@ impl Surface {
             None
         }
     }
+
+    pub fn clear(&mut self, rect: Rect) {
+        let y0 = cmp::max(0, rect.y0) as usize;
+        let y1 = cmp::min(self.h as i16, rect.y1) as usize;
+        let x0 = cmp::max(0, rect.x0) as usize;
+        let x1 = cmp::min(self.w as i16, rect.x1) as usize;
+
+        let w = self.w as usize;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let cell = &mut self.cells[x + y * w];
+                cell.style = Style::default();
+                cell.c = ' ';
+            }
+        }
+    }
 }
 
 pub struct SurfaceRef<'a> {
@@ -259,6 +275,25 @@ impl<'a> SurfaceMut<'a> {
                 y1: self.rect.y0 + rect.y1,
             },
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.surface.clear(self.rect);
+    }
+
+    pub fn fill(&mut self, color: Color) {
+        for y in self.rect.y0..self.rect.y1 {
+            for x in self.rect.x0..self.rect.x1 {
+                self.surface.put(' ', x, y, Style::bg(color));
+            }
+        }
+    }
+
+    pub fn put(&mut self, c: char, x: i16, y: i16, style: Style) {
+        if x < 0 || x >= self.width() as i16 || y < 0 || y >= self.height() as i16 {
+            return;
+        }
+        self.surface.put(c, x + self.rect.x0, y + self.rect.y0, style);
     }
 }
 

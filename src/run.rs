@@ -1,10 +1,10 @@
-use futures::{Async, Future, IntoFuture};
+use futures::{Async, future, Future, IntoFuture};
 use std::{io, fmt};
 use crate::screen::Screen;
 use crate::widget::Widget;
 use crate::io::non_blocking_stdio;
-use crate::input::Events;
 use log::trace;
+use crate::events::EventTaskHandle;
 
 #[derive(Debug)]
 pub enum RunError<E> {
@@ -24,29 +24,29 @@ where
     }
 }
 
-pub fn run<F, W>(f: F) -> impl Future<Item = W::Item, Error = RunError<W::Error>>
+pub fn run<W>(widget: W) -> impl Future<Item = W::Item, Error = RunError<W::Error>>
 where
-    F: FnOnce(Events) -> W,
     W: Widget,
 {
-    termion::terminal_size()
-    .into_future()
-    .map_err(RunError::Io)
-    .and_then(|(w, h)| {
-        non_blocking_stdio()
+    future::lazy(|| {
+        termion::terminal_size()
         .into_future()
         .map_err(RunError::Io)
-        .and_then(move |(stdin, stdout)| {
-            trace!("creating screen with dimensions ({}, {})", w, h);
-            Events::new(stdin)
+        .and_then(|(w, h)| {
+            non_blocking_stdio()
             .into_future()
             .map_err(RunError::Io)
-            .and_then(move |events| {
-                let widget = f(events);
-                Screen::new(stdout, w, h)
+            .and_then(move |(stdin, stdout)| {
+                trace!("creating screen with dimensions ({}, {})", w, h);
+                EventTaskHandle::new(stdin)
+                .into_future()
                 .map_err(RunError::Io)
-                .and_then(move |screen| {
-                    Run { screen, widget }
+                .and_then(move |event_task_handle| {
+                    Screen::new(stdout, w, h)
+                    .map_err(RunError::Io)
+                    .and_then(move |screen| {
+                        Run { screen, widget, _event_task_handle: event_task_handle }
+                    })
                 })
             })
         })
@@ -56,6 +56,7 @@ where
 pub struct Run<W> {
     screen: Screen,
     widget: W,
+    _event_task_handle: EventTaskHandle,
 }
 
 impl<W: Widget> Future for Run<W> {
