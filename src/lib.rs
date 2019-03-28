@@ -18,6 +18,6 @@ pub mod events;
 pub mod widget;
 pub use run::{RunError, run};
 pub use widget::{Widget, FutureExt};
-pub use widget_macro::{widget, select_widget, await_widget};
+pub use termcandy_macros::{widget, select_widget, await_widget};
 pub use screen::screen_size;
 

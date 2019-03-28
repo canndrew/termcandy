@@ -1,5 +1,5 @@
 [package]
-name = "widget-macro"
+name = "termcandy-macros"
 version = "0.1.0"
 authors = ["Andrew Cann <shum@canndrew.org>"]
 edition = "2018"

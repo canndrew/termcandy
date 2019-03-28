@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 futures = "0.1"
-widget-macro = { path = "widget-macro", version = "0.1.0" }
+termcandy-macros = { path = "termcandy-macros", version = "0.1.0" }
 tokio = "0.1.17"
 libc = "0.2.50"
 mio = "0.6.16"

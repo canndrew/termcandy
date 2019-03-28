@@ -2,7 +2,7 @@ use std::ops::{Generator, GeneratorState};
 use std::marker::PhantomPinned;
 use futures::{Async, Future};
 use crate::graphics::{SurfaceMut, Rect};
-pub use widget_macro::widget;
+pub use termcandy_macros::widget;
 use crate::events;
 use std::pin::Pin;
 use termion::event::{MouseEvent, Event};
