@@ -1,6 +1,5 @@
 /target
 Cargo.lock
 **/*.rs.bk
-widget-macro/target
-widget-macro/Cargo.lock
+termcandy-macros/target
 
