@@ -1,16 +1,4 @@
-# `termcandy`
-
-`termcandy` is a library for writing terminal user interfaces using
-imperative-style code. This means you don't have to structure your program
-around an event loop, just write natural-looking control flow and let macro
-magic do the rest.
-
-## Example
-
-This program will draw a blue ball bouncing around the screen until the user
-presses escape.
-
-```rust
+#![type_length_limit="30000000"]
 #![feature(proc_macro_hygiene)]
 #![feature(never_type)]
 #![feature(generators)]
@@ -51,17 +39,6 @@ fn bouncing_ball() -> Result<(), failure::Error> {
     }
 }
 
-fn main() {
-    tokio::runtime::current_thread::block_on_all(termcandy::run(bouncing_ball())).expect("oh no!")
-}
-```
-
-We could also divide the screen into 4 corners and reuse the above code to make
-4 balls bounce around those corners. Note that this function doesn't require
-any loops to write. If you resize the terminal window while it's running it
-will react accordingly.
-
-```rust
 use termcandy::Widget;
 use termcandy::graphics::Rect;
 
@@ -95,5 +72,9 @@ fn four_bouncing_balls() -> Result<(), failure::Error> {
     }
     Ok(())
 }
-```
+
+fn main() {
+    tokio::runtime::current_thread::block_on_all(termcandy::run(four_bouncing_balls())).expect("oh no!")
+}
+
 
