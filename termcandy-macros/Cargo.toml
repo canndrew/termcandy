@@ -3,6 +3,10 @@ name = "termcandy-macros"
 version = "0.1.0"
 authors = ["Andrew Cann <shum@canndrew.org>"]
 edition = "2018"
+documentation = "https://docs.rs/termcandy"
+repository = "https://github.com/canndrew/termcandy"
+license = "LGPL-2.0-only"
+description = "macros for termcandy"
 
 [lib]
 proc-macro = true

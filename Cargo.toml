@@ -3,6 +3,10 @@ name = "termcandy"
 version = "0.1.0"
 authors = ["Andrew Cann <shum@canndrew.org>"]
 edition = "2018"
+documentation = "https://docs.rs/termcandy"
+repository = "https://github.com/canndrew/termcandy"
+license = "LGPL-2.0-only"
+description = "terminal GUI library"
 
 [dependencies]
 futures = "0.1"
