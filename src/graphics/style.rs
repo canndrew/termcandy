@@ -1,4 +1,4 @@
-use crate::graphics::Color;
+use super::*;
 
 /// The color and styling attributes of a terminal cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]

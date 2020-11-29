@@ -1,10 +1,7 @@
-use std::ops::{Generator, GeneratorState};
-use std::marker::PhantomPinned;
-use futures::{Async, Future};
+use super::*;
+
 use crate::graphics::{SurfaceMut, Rect};
-pub use termcandy_macros::widget;
-use crate::events;
-use std::pin::Pin;
+use crate::input;
 use termion::event::{MouseEvent, Event};
 
 /// A `Widget` is a `Future` that can be drawn.
@@ -43,72 +40,6 @@ pub trait Widget: Future {
     }
 }
 
-#[doc(hidden)]
-pub struct GenWidget<G> {
-    gen: G,
-    pub drawer: Option<Box<dyn for<'s, 'm> Fn(&'m mut SurfaceMut<'s>) + 'static>>,
-    _pinned: PhantomPinned,
-}
-
-impl<G> GenWidget<G> {
-    pub fn new(gen: G) -> GenWidget<G> {
-        GenWidget {
-            drawer: None,
-            gen: gen,
-            _pinned: std::marker::PhantomPinned,
-        }
-    }
-}
-
-#[doc(hidden)]
-pub fn nil_drawer<'s, 'm>(_: &'m mut SurfaceMut<'s>) {}
-
-impl<T, E, G> Future for GenWidget<G>
-where
-    G: Generator<Yield = Box<dyn for<'s, 'm> Fn(&'m mut SurfaceMut<'s>) + 'static>, Return = Result<T, E>>
-{
-    type Item = T;
-    type Error = E;
-
-    fn poll(&mut self) -> Result<Async<T>, E> {
-        drop(self.drawer.take());
-        let gen = unsafe { Pin::new_unchecked(&mut self.gen) };
-        match gen.resume() {
-            GeneratorState::Yielded(drawer) => {
-                self.drawer = Some(drawer);
-                Ok(Async::NotReady)
-            },
-            GeneratorState::Complete(val) => Ok(Async::Ready(val?)),
-        }
-    }
-}
-
-impl<T, E, G> Widget for GenWidget<G>
-where
-    G: Generator<Yield = Box<dyn for<'s, 'm> Fn(&'m mut SurfaceMut<'s>) + 'static>, Return = Result<T, E>>
-{
-    fn draw<'s, 'm>(&self, surface: &'m mut SurfaceMut<'s>) {
-        if let Some(drawer) = &self.drawer {
-            drawer(surface)
-        }
-    }
-}
-
-impl<G> Drop for GenWidget<G> {
-    fn drop(&mut self) {
-        // need to make sure this gets dropped first.
-        // since it can reference gen
-        drop(self.drawer.take());
-    }
-}
-
-#[doc(hidden)]
-pub unsafe fn forge_lifetime<'a>(b: Box<dyn for<'s, 'm> Fn(&'m mut SurfaceMut<'s>) + 'a>)
-    -> Box<dyn for<'s, 'm> Fn(&'m mut SurfaceMut<'s>) + 'static>
-{
-    std::mem::transmute(b)
-}
-
 /// Extension trait for futures.
 pub trait FutureExt: Future {
     /// Convert any future to a widget by giving it a draw method.
@@ -124,7 +55,9 @@ pub trait FutureExt: Future {
     }
 }
 
+#[pin_project]
 pub struct DrawAs<F, D> {
+    #[pin]
     future: F,
     drawer: D,
 }
@@ -133,11 +66,11 @@ impl<F, D> Future for DrawAs<F, D>
 where
     F: Future,
 {
-    type Item = F::Item;
-    type Error = F::Error;
+    type Output = F::Output;
 
-    fn poll(&mut self) -> Result<Async<F::Item>, F::Error> {
-        self.future.poll()
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
+        let this = self.project();
+        this.future.poll(cx)
     }
 }
 
@@ -158,66 +91,55 @@ where
 
 impl<'a, W> Widget for &'a mut W
 where
-    W: Widget,
+    W: Widget + Unpin,
 {
     fn draw<'s, 'm>(&self, surface: &'m mut SurfaceMut<'s>) {
         (**self).draw(surface)
     }
 }
 
-#[doc(hidden)]
-pub trait SelectDraw: Future {
-    fn select_draw<'s, 'm>(&self, surface: &'m mut SurfaceMut<'s>);
-}
-
-impl<W: Future> SelectDraw for W {
-    default fn select_draw<'s, 'm>(&self, _surface: &'m mut SurfaceMut<'s>) {
-    }
-}
-
-impl<W: Widget> SelectDraw for W {
-    fn select_draw<'s, 'm>(&self, surface: &'m mut SurfaceMut<'s>) {
-        self.draw(surface)
-    }
-}
-
-struct DrawWidget<F> {
+pub struct Draw<F> {
     draw: F,
 }
 
 /// Create a widget that never completes and draws itself using the given method.
-pub fn draw<F>(draw: F) -> impl Widget<Item = !, Error = !>
+//pub fn draw<F>(draw: F) -> impl Widget<Output = !>
+pub fn draw<F>(draw: F) -> Draw<F>
 where
     F: for<'s, 'm> Fn(&'m mut SurfaceMut<'s>),
 {
-    DrawWidget {
+    Draw {
         draw,
     }
 }
 
-impl<F> Future for DrawWidget<F>
+impl<F> Future for Draw<F>
 where
     F: for<'s, 'm> Fn(&'m mut SurfaceMut<'s>),
 {
-    type Item = !;
-    type Error = !;
+    type Output = !;
 
-    fn poll(&mut self) -> Result<Async<!>, !> {
-        Ok(Async::NotReady)
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<!> {
+        let ass: &Draw<F> = self.as_ref().get_ref();
+        trace!("in Draw::poll, self == {:?}", ass as *const _);
+        Poll::Pending
     }
 }
 
-impl<F> Widget for DrawWidget<F>
+impl<F> Widget for Draw<F>
 where
     F: for<'s, 'm> Fn(&'m mut SurfaceMut<'s>),
 {
     fn draw<'s, 'm>(&self, surface: &'m mut SurfaceMut<'s>) {
+        trace!("in Draw::draw, self == {:?}", self as *const _);
         (self.draw)(surface)
     }
 }
 
 /// Widget created using the `Widget::resize` method.
+#[pin_project]
 pub struct Resize<W, M> {
+    #[pin]
     widget: W,
     map: M,
 }
@@ -227,11 +149,11 @@ where
     W: Future,
     M: Fn(u16, u16) -> Rect + Sync + Send,
 {
-    type Item = W::Item;
-    type Error = W::Error;
+    type Output = W::Output;
 
-    fn poll(&mut self) -> Result<Async<W::Item>, W::Error> {
-        let map = &self.map;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<W::Output> {
+        let this = self.project();
+        let map = this.map;
         let (w, h) = crate::screen::screen_size();
         let area = map(w, h);
         let mapped_w = (area.x1 - area.x0) as u16;
@@ -242,9 +164,9 @@ where
             }
             Some((x - area.x0 as u16, y - area.y0 as u16))
         };
-        let widget = &mut self.widget;
+        let widget = this.widget;
         crate::screen::with_screen_size(mapped_w, mapped_h, || {
-            events::with_event_map(
+            input::with_event_map(
                 |event| Some(match event {
                     Event::Mouse(mouse_event) => Event::Mouse(match mouse_event {
                         MouseEvent::Press(button, x, y) => {
@@ -262,7 +184,7 @@ where
                     }),
                     event => event,
                 }),
-                || widget.poll(),
+                panic::AssertUnwindSafe(move || widget.poll(cx)),
             )
         })
     }
@@ -281,7 +203,9 @@ where
 }
 
 /// Widget created using the `Widget::map_events` method.
+#[pin_project]
 pub struct MapEvents<W, M> {
+    #[pin]
     widget: W,
     map: M,
 }
@@ -291,13 +215,13 @@ where
     W: Future,
     M: Fn(Event) -> Option<Event> + Sync + Send,
 {
-    type Item = W::Item;
-    type Error = W::Error;
+    type Output = W::Output;
 
-    fn poll(&mut self) -> Result<Async<W::Item>, W::Error> {
-        let map = &self.map;
-        let widget = &mut self.widget;
-        events::with_event_map(map, || widget.poll())
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<W::Output> {
+        let this = self.project();
+        let map = &*this.map;
+        let widget = this.widget;
+        input::with_event_map(map, panic::AssertUnwindSafe(|| widget.poll(cx)))
     }
 }
 

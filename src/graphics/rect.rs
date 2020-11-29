@@ -1,4 +1,4 @@
-use std::cmp;
+use super::*;
 
 /// A rectangle representing a region of a surface.
 #[derive(Debug, Clone, Copy)]

@@ -12,7 +12,7 @@ description = "macros for termcandy"
 proc-macro = true
 
 [dependencies]
-syn = { version = "0.15", features = ["full", "visit-mut", "extra-traits"] }
-quote = "0.6"
-proc-macro2 = "0.4.27"
+syn = { version = "1.0.52", features = ["full", "visit-mut", "extra-traits"] }
+quote = "1.0.7"
+proc-macro2 = "1.0.24"
 

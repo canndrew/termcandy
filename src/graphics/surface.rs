@@ -1,6 +1,4 @@
-use crate::graphics::{Style, Rect, Color};
-use unicode_width::UnicodeWidthChar;
-use std::cmp;
+use super::*;
 
 /// A single grid cell of text on the terminal.
 #[derive(PartialEq, Eq, Clone, Copy)]

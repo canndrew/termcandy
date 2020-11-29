@@ -4,15 +4,14 @@
 #![feature(generators)]
 #![feature(label_break_value)]
 
-use std::time::{Instant, Duration};
+use std::time::Duration;
 use termcandy::{widget, select_widget};
-use termcandy::events::{self, Key};
+use termcandy::input::{self, Key};
 use termcandy::graphics::{Style, Color, Attrs};
-use tokio::timer;
-use futures::Future;
+use tokio::time::{self, Instant};
 
 #[widget]
-fn bouncing_ball() -> Result<(), failure::Error> {
+fn bouncing_ball() {
     let mut pos_x = 0;
     let mut pos_y = 0;
     let mut vel_x = 1;
@@ -21,8 +20,8 @@ fn bouncing_ball() -> Result<(), failure::Error> {
     let style = Style { fg: Color::blue(), bg: Color::default(), attrs: Attrs::bold() };
     loop {
         select_widget! {
-            () = timer::Delay::new(next_instant) => {
-                next_instant += Duration::from_millis(100);
+            () = time::sleep_until(next_instant) => {
+                next_instant += Duration::from_millis(200);
                 let (w, h) = termcandy::screen_size();
                 if pos_x <= 0 { vel_x = 1 };
                 if pos_x >= w as i16 { vel_x = -1 };
@@ -31,7 +30,7 @@ fn bouncing_ball() -> Result<(), failure::Error> {
                 pos_x += vel_x;
                 pos_y += vel_y;
             },
-            () = events::key(Key::Esc) => return Ok(()),
+            () = input::key(Key::Esc) => return,
             never = widget::draw(|surface| {
                 surface.print("●", pos_x, pos_y, style)
             }) => never,
@@ -43,7 +42,7 @@ use termcandy::Widget;
 use termcandy::graphics::Rect;
 
 #[widget]
-fn four_bouncing_balls() -> Result<(), failure::Error> {
+fn four_bouncing_balls() {
     let top_left = bouncing_ball().resize(|w, h| {
         Rect { x0: 0, x1: w as i16 / 2, y0: 0, y1: h as i16 / 2 }
     });
@@ -70,11 +69,11 @@ fn four_bouncing_balls() -> Result<(), failure::Error> {
             surface.draw_h_line(0, surface.width() as i16 - 1, surface.height() as i16 - 1);
         }) => never
     }
-    Ok(())
 }
 
-fn main() {
-    tokio::runtime::current_thread::block_on_all(termcandy::run(four_bouncing_balls())).expect("oh no!")
+#[tokio::main]
+async fn main() {
+    termcandy::logger::init().unwrap();
+    termcandy::run(four_bouncing_balls()).await.unwrap();
 }
-
 

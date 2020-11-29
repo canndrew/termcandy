@@ -1,22 +1,26 @@
-use std::io::Write;
-use std::io;
-use unicode_width::UnicodeWidthChar;
-use futures::{Async, Future, Stream, IntoFuture};
-use libc::SIGWINCH;
-use tokio_signal::unix::Signal;
-use tokio::reactor::PollEvented2;
-use tokio::io::AsyncWrite;
-use futures::task_local;
+use super::*;
 
-use crate::io::{force_write, AlternateScreen, MouseTerminal, NonBlockingStdout, RawMode};
+use tokio::signal::unix::{signal, Signal, SignalKind};
+
+use crate::terminal::{AlternateScreen, MouseTerminal, NonBlockingStdout, RawMode, Blocking};
 use crate::graphics::{Color, Style, Surface, UnderlineKind};
 use crate::widget::Widget;
 
-task_local!(static SCREEN_SIZE: std::cell::Cell<(u16, u16)> = std::cell::Cell::new((0, 0)));
+task_local! {
+    static SCREEN_SIZE: std::cell::Cell<(u16, u16)>; // = std::cell::Cell::new((0, 0));
+}
 
-pub struct Screen {
-    inner: PollEvented2<AlternateScreen<MouseTerminal<RawMode<NonBlockingStdout>>>>,
-    sigwinch: Signal,
+pub async fn with_screen<F, U>(stdout: NonBlockingStdout, func: F) -> io::Result<U::Output>
+where
+    F: FnOnce(Screen) -> U,
+    U: Future,
+{
+    let (w, h) = termion::terminal_size()?;
+    let screen = Screen::new(stdout, w, h).await?;
+    Ok(SCREEN_SIZE.scope(std::cell::Cell::new((w, h)), func(screen)).await)
+}
+
+struct Buffers {
     front_buffer: Surface,
     back_buffer: Surface,
     writing: Vec<u8>,
@@ -27,52 +31,16 @@ pub struct Screen {
     current_style: Style,
 }
 
-impl Screen {
-    pub fn new(stdout: NonBlockingStdout, w: u16, h: u16)
-        -> impl Future<Item=Screen, Error=io::Error> + 'static
-    {
-        RawMode::new(stdout)
-        .into_future()
-        .and_then(move |stdout| {
-            MouseTerminal::new(stdout)
-            .and_then(move |stdout| {
-                AlternateScreen::new(stdout)
-                .join(Signal::new(SIGWINCH))
-                .map(move |(inner, signal)| {
-                    SCREEN_SIZE.with(|screen_size| screen_size.set((w, h)));
-                    let mut writing = Vec::new();
-                    let _ = write!(writing, "{}", termion::cursor::Hide);
-                    Screen {
-                        inner: PollEvented2::new(inner),
-                        front_buffer: Surface::blank(w, h),
-                        back_buffer: Surface::blank(w, h),
-                        sigwinch: signal,
-                        writing: writing,
-                        damaged: true,
-                        amount_written: 0,
-                        cursor_x: 0,
-                        cursor_y: 0,
-                        current_style: Style::default(),
-                    }
-                })
-            })
-        })
+impl Buffers {
+    fn resize(&mut self, w: u16, h: u16) {
+        self.front_buffer = Surface::blank(w, h);
+        self.back_buffer = Surface::blank(w, h);
+        self.writing.clear();
+        self.writing.reserve(w as usize * h as usize * 2);
+        self.damage();
     }
 
-    pub fn poll_for_resizes(&mut self) -> io::Result<Async<(u16, u16)>> {
-        if let Async::Ready(Some(SIGWINCH)) = self.sigwinch.poll()? {
-            let (w, h) = termion::terminal_size()?;
-            SCREEN_SIZE.with(|screen_size| screen_size.set((w, h)));
-            self.front_buffer = Surface::blank(w, h);
-            self.back_buffer = Surface::blank(w, h);
-            self.writing = Vec::with_capacity(w as usize * h as usize * 2);
-            self.damage();
-            return Ok(Async::Ready((w, h)));
-        }
-        Ok(Async::NotReady)
-    }
-
-    pub fn damage(&mut self) {
+    fn damage(&mut self) {
         self.damaged = true;
         self.writing.clear();
         write!(&mut self.writing, "{}", termion::cursor::Goto(1, 1)).unwrap();
@@ -81,7 +49,7 @@ impl Screen {
         self.cursor_y = 0;
     }
 
-    pub fn draw_widget<W>(&mut self, widget: &W)
+    fn draw_widget<W>(&mut self, widget: &W)
     where
         W: Widget
     {
@@ -90,31 +58,8 @@ impl Screen {
         widget.draw(&mut surface);
     }
 
-    pub fn flush(&mut self) -> io::Result<Async<()>> {
-        match self.flush_front()? {
-            Async::NotReady => return Ok(Async::NotReady),
-            Async::Ready(()) => (),
-        };
-        self.swap_buffers();
-        self.flush_front()
-    }
-
-    fn flush_front(&mut self) -> io::Result<Async<()>> {
-        loop {
-            if self.amount_written == self.writing.len() {
-                self.writing.clear();
-                self.amount_written = 0;
-                return Ok(Async::Ready(()));
-            }
-            match self.inner.poll_write(&self.writing[self.amount_written..])? {
-                Async::Ready(n) => self.amount_written += n,
-                Async::NotReady => return Ok(Async::NotReady),
-            }
-        }
-    }
-
     fn move_cursor(&mut self, x: u16, y: u16) {
-        // TODO: better optimizations here for moving cursor position
+        // TODO: This gets called a lot. Need better optimizations here for moving cursor position
         if x != self.cursor_x || y != self.cursor_y {
             write!(&mut self.writing, "{}", termion::cursor::Goto(x + 1, y + 1)).unwrap();
             self.cursor_x = x;
@@ -247,11 +192,105 @@ impl Screen {
     }
 }
 
+#[pin_project]
+pub struct Screen {
+    #[pin]
+    inner: AlternateScreen<MouseTerminal<RawMode<NonBlockingStdout>>>,
+    #[pin]
+    sigwinch: Signal,
+    buffers: Buffers,
+}
+
+impl Screen {
+    pub async fn new(stdout: NonBlockingStdout, w: u16, h: u16) -> io::Result<Screen> {
+        let stdout = RawMode::new(stdout)?;
+        let stdout = MouseTerminal::new(stdout).await?;
+        let stdout = AlternateScreen::new(stdout).await?;
+        let sigwinch = signal(SignalKind::window_change())?;
+        let mut writing = Vec::new();
+        let _ = write!(writing, "{}", termion::cursor::Hide);
+        let buffers = Buffers {
+            front_buffer: Surface::blank(w, h),
+            back_buffer: Surface::blank(w, h),
+            writing: writing,
+            damaged: true,
+            amount_written: 0,
+            cursor_x: 0,
+            cursor_y: 0,
+            current_style: Style::default(),
+        };
+        Ok(Screen {
+            inner: stdout,
+            sigwinch,
+            buffers,
+        })
+    }
+
+    pub fn poll_for_resizes(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<(u16, u16)>> {
+        let this = self.project();
+        if let Poll::Ready(Some(())) = this.sigwinch.poll_next(cx) {
+            let (w, h) = match termion::terminal_size() {
+                Err(err) => return Poll::Ready(Err(err)),
+                Ok(size) => size,
+            };
+            SCREEN_SIZE.with(|screen_size| screen_size.set((w, h)));
+            this.buffers.resize(w, h);
+            return Poll::Ready(Ok((w, h)));
+        }
+        Poll::Pending
+    }
+
+    /*
+    pub fn damage(&mut self) {
+        self.buffers.damage();
+    }
+    */
+
+    pub fn draw_widget<W>(&mut self, widget: &W)
+    where
+        W: Widget
+    {
+        self.buffers.draw_widget(widget)
+    }
+
+    pub fn flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let mut this = self.project();
+        match Screen::flush_front(this.inner.as_mut(), cx, this.buffers) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+            Poll::Ready(Ok(())) => (),
+        };
+        this.buffers.swap_buffers();
+        Screen::flush_front(this.inner.as_mut(), cx, this.buffers)
+    }
+
+    fn flush_front(
+        mut inner: Pin<&mut AlternateScreen<MouseTerminal<RawMode<NonBlockingStdout>>>>,
+        cx: &mut Context<'_>,
+        buffers: &mut Buffers,
+    ) -> Poll<io::Result<()>> {
+        loop {
+            if buffers.amount_written == buffers.writing.len() {
+                buffers.writing.clear();
+                buffers.amount_written = 0;
+                return Poll::Ready(Ok(()));
+            }
+            trace!("screen: {:?}", &buffers.writing[buffers.amount_written..]);
+            match inner.as_mut().poll_write(cx, &buffers.writing[buffers.amount_written..]) {
+                Poll::Ready(Ok(n)) => buffers.amount_written += n,
+                Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+    }
+}
+
 impl Drop for Screen {
     fn drop(&mut self) {
-        let mut v = Vec::new();
-        let _ = write!(v, "{}", termion::cursor::Show);
-        force_write(&mut self.inner, v);
+        if let Ok(blocking) = Blocking::new() {
+            let _ = Write::write_all(&mut self.inner, termion::cursor::Show.as_ref());
+            drop(blocking);
+        }
     }
 }
 
